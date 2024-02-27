@@ -39,6 +39,7 @@ type Review struct {
 }
 
 func populateReviewsFromDB(db *database.Database) {
+	reviews = map[string][]Review{}
 	for folkTale := range FolkTales {
 		feedbacks, err := db.GetFeedbacksByFolkTale(folkTale)
 		if err != nil {
@@ -184,8 +185,9 @@ func handleFolkTale(bot *tgbotapi.BotAPI, db *database.Database, message *tgbota
 	}
 
 	btn := tgbotapi.NewInlineKeyboardButtonData("Оставить отзыв", "/feedback")
+	btnReviews := tgbotapi.NewInlineKeyboardButtonData("Отзывы", "/reviews")
 	msg = tgbotapi.NewMessage(message.Chat.ID, "Если хотите оставить отзыв, нажмите кнопку ниже.")
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btn))
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btn, btnReviews))
 	_, err = bot.Send(msg)
 	if err != nil {
 		log.Println("Проблема с отправкой текста:", err)
@@ -197,6 +199,8 @@ func handleCallbackQuery(bot *tgbotapi.BotAPI, callbackQuery *tgbotapi.CallbackQ
 	case "/feedback":
 		sendFeedbackMessage(bot, callbackQuery.Message.Chat.ID)
 		setFeedbackState(callbackQuery.Message.Chat.ID)
+	case "/reviews":
+		handleReviewsCommand(bot, callbackQuery.Message)
 	}
 }
 
@@ -224,6 +228,7 @@ func handleFeedback(bot *tgbotapi.BotAPI, db *database.Database, message *tgbota
 		}
 	} else {
 		log.Println("Отзыв успешно сохранен в базе данных.")
+		populateReviewsFromDB(db)
 		msg := tgbotapi.NewMessage(message.Chat.ID, "Спасибо за ваш отзыв!")
 		_, err := bot.Send(msg)
 		if err != nil {
@@ -235,17 +240,22 @@ func handleFeedback(bot *tgbotapi.BotAPI, db *database.Database, message *tgbota
 func handleReviewsCommand(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 	chatID := message.Chat.ID
 
-	// Create message with reviews
-	var reviewsText string
-	for folkTale, reviews := range reviews {
-		reviewsText += "Отзывы на сказку \"" + folkTale + "\":\n"
-		for _, review := range reviews {
-			reviewsText += "- " + review.ReviewText + "\n"
-		}
-		reviewsText += "\n"
+	// Retrieve selected folk tale from chat state
+	chatState, ok := chatStates[chatID]
+	if !ok {
+		return
 	}
+	selectedFolkTale := chatState.SelectedFolkTale
 
-	// Send reviews to user
+	// Create message with reviews for the selected folk tale
+	reviewsForSelectedTale := reviews[selectedFolkTale]
+	var reviewsText string
+	for _, review := range reviewsForSelectedTale {
+		reviewsText += "- " + review.ReviewText + "\n"
+	}
+	if reviewsText == "" {
+		reviewsText = "Пока нет отзывов для этой сказки."
+	}
 	msg := tgbotapi.NewMessage(chatID, reviewsText)
 	_, err := bot.Send(msg)
 	if err != nil {
